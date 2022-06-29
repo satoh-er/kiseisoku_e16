@@ -2,12 +2,5 @@
 __pycache__
 .idea/
 venv/
-result_detail.csv
-result_digest.csv
 /.pytest_cache/
 .pytest_cache/
-docs/build/
-result_detail_a.csv
-result_detail_i.csv
-dist
-out
