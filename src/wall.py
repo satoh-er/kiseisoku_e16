@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 class Wall:
 
-    def __init__(self, name, parameter_at, parameter_aa, aa0, at0):
+    def __init__(self, name: float, parameter_at: float, parameter_aa: float, aa0: float, at0: float, eta: float):
 
         # 名称
         self.name = name
@@ -16,6 +16,9 @@ class Wall:
         # 応答係数の定常項
         self.aa0 = aa0
         self.at0 = at0
+
+        # 日射熱取得率
+        self.eta = eta
 
 
     def calc_rf(self):
