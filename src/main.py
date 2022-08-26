@@ -2,14 +2,45 @@ from this import d
 import pandas as pd
 import numpy as np
 import copy
+import json
 
 import wall as wl
 import room as rm
-import weather as wdt
-# import pre_calc_parameters as pcp
+import weather_old as wdt
+import weather
+import pre_calc_parameters as pcp
+import schedule as scd
+import interval
 
 
 def main():
+
+    delta_t = 900.0
+
+    with open('example_single_room1.json', 'r', encoding='utf-8') as js:
+        rd = json.load(js)
+
+    # 気象データの生成 => weather_for_method_file.csv
+    w = weather.Weather.make_weather(
+        method='ees',
+        file_path='expanded_amedas',
+        region=6,
+        itv=interval.Interval.M15
+    )
+
+    # スケジュール
+    schedule = scd.Schedule.get_schedule(
+        number_of_occupants='auto',
+        s_name_is=[rm['schedule']['name'] for rm in rd['rooms']],
+        a_floor_is=[r['floor_area'] for r in rd['rooms']]
+    )
+
+    pp, ppg = pcp.make_pre_calc_parameters(
+        delta_t=delta_t,
+        rd=rd,
+        oc=w,
+        scd=schedule
+    )
 
     # 応答係数のパラメータを読み込む
     parameters_rf = pd.read_excel('parameters.xlsx', sheet_name='parameters_rf', header=[0, 1])
