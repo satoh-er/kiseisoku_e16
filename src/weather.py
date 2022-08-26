@@ -1,12 +1,14 @@
 import pandas as pd
 import numpy as np
 
+import library as lib
+
 class Weather:
 
     def __init__(self, weather_pd: pd.DataFrame):
 
         # 外気温度[℃]
-        self.theta_o = self.interpolate(weather_data=weather_pd['外気温[℃]'].values, rolling=True)
+        self.theta_o = lib.moving_average(self.interpolate(weather_data=weather_pd['外気温[℃]'].values, rolling=True))
 
         # 法線面直達日射量[W/m2]
         self.idn = self.interpolate(weather_data=weather_pd['法線面直達日射量 [W/m2]'].values, rolling=True)
