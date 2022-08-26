@@ -162,26 +162,6 @@ class Room:
         else:
             self.l_r_h = heating_capacity
 
-        self.f_wsr_js: np.ndarray = None
-        self.f_wqr_js: np.ndarray = None
-        self.f_wsrs_js: np.ndarray = None
-        self.f_wscs_js: np.ndarray = None
-        self.f_wqss_js: np.ndarray = None
-        self.f_ot_js: np.ndarray = None
-        self.a0: np.ndarray = None
-        self.eps: np.ndarray = None
-        self.b0: np.ndarray = None
-        self.b1: np.ndarray = None
-        self.b2: np.ndarray = None
-        self.c0: np.ndarray = None
-        self.c1: np.ndarray = None
-        self.c2: np.ndarray = None
-        self.c3: np.ndarray = None
-        self.d0: np.ndarray = None
-        self.d1: np.ndarray = None
-        self.d2: np.ndarray = None
-        self.d3: np.ndarray = None
-
     def building_part_append(self,
                              name: str,
                              area: float,
@@ -229,7 +209,7 @@ class Room:
         # 追加した部位の傾斜面特性値の計算
         self.building_parts[-1].calc_wz_ww_ws()
 
-    def calc_f(self):
+    def calc_f(self) -> (np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray):
         """
         係数fの計算（初期に一度だけ計算すれば求まる係数）
         :return:
@@ -253,11 +233,13 @@ class Room:
         flr_js = np.array([bp.flr for bp in self.building_parts])
         area_js = np.array([bp.area for bp in self.building_parts])
         temp_js = 1.0 + rfa0_js * hi_js
-        self.f_wsr_js = (rfa0_js * hi_js + (1.0 - temp_diff_coeff_js) * rft0_js) / temp_js
-        self.f_wqr_js = rfa0_js / temp_js * flr_js / area_js * (1.0 - self.beta)
-        self.f_wsrs_js = (f_ar_js + f_tr_js) / temp_js
-        self.f_wscs_js = (rft0_js * temp_diff_coeff_js + f_ao_js + f_to_js) / temp_js
-        self.f_wqss_js = (rfa0_js + f_aq_js) / temp_js
+        f_wsr_js = (rfa0_js * hi_js + (1.0 - temp_diff_coeff_js) * rft0_js) / temp_js
+        f_wqr_js = rfa0_js / temp_js * flr_js / area_js * (1.0 - self.beta)
+        f_wsrs_js = (f_ar_js + f_tr_js) / temp_js
+        f_wscs_js = (rft0_js * temp_diff_coeff_js + f_ao_js + f_to_js) / temp_js
+        f_wqss_js = (rfa0_js + f_aq_js) / temp_js
+
+        return (f_wsr_js, f_wqr_js, f_wsrs_js, f_wscs_js, f_wqss_js)
 
     def calc_fot_js(self):
         """
@@ -268,9 +250,11 @@ class Room:
 
         a_js = np.array([bp.area for bp in self.building_parts])
 
-        self.f_ot_js = a_js / np.sum(a_js)
+        fot_js = a_js / np.sum(a_js)
 
-    def calc_a0(self):
+        return fot_js
+
+    def calc_a0(self, f_wsr_js: np.ndarray) -> float:
         """
         係数a0の計算（初期に一度だけ計算すれば求まる係数）
         :return:
@@ -280,17 +264,21 @@ class Room:
         a_js = np.array([bp.area for bp in self.building_parts])
         hi_js = np.array([bp.hi for bp in self.building_parts])
 
-        self.a0 = np.sum(a_js * hi_js * (1.0 - self.f_wsr_js)) + ct.c_a * ct.rho_a * self.vent_volume
+        a0 = np.sum(a_js * hi_js * (1.0 - f_wsr_js)) + ct.c_a * ct.rho_a * self.vent_volume
 
-    def calc_eps(self):
+        return a0
+
+    def calc_eps(self, a0: float) -> float:
         """
         係数εの計算（初期に一度だけ計算すれば求まる係数）
         :return:
         """
 
-        self.eps = math.exp(- self.a0 / self.cap * ct.preheat_time)
+        eps = math.exp(- a0 / self.cap * ct.preheat_time)
 
-    def calc_b(self):
+        return eps
+
+    def calc_b(self, f_wsrs_js: np.ndarray, f_wqr_js: np.ndarray) -> (float, float):
         """
         係数b0、b1の計算（初期に一度だけ計算すれば求まる係数）
         :return:
@@ -302,11 +290,20 @@ class Room:
         flr_js = np.array([bp.flr for bp in self.building_parts])
         rfa0_js = np.array([bp.rfa0 for bp in self.building_parts])
 
-        self.b0 = np.sum(a_js * hi_js * self.f_wsrs_js)
+        b0 = np.sum(a_js * hi_js * f_wsrs_js)
 
-        self.b1 = self.beta + np.sum(a_js * hi_js * self.f_wqr_js)
+        b1 = self.beta + np.sum(a_js * hi_js * f_wqr_js)
 
-    def calc_b2(self, theta_o_s: float, theta_eo_s_js: float, q_sol_s_js: float, H_n: float):
+        return (b0, b1)
+
+    def calc_b2(
+        self,
+        f_wqss_js: np.ndarray,
+        f_wscs_js: np.ndarray,
+        theta_o_s: float,
+        theta_eo_s_js: float,
+        q_sol_s_js: float,
+        H_n: float) -> float:
         """
         係数b2の計算（毎時計算が必要）
         :param theta_o_s: 外気温度[℃]
@@ -320,10 +317,19 @@ class Room:
         a_js = np.array([bp.area for bp in self.building_parts])
         hi_js = np.array([bp.hi for bp in self.building_parts])
 
-        self.b2 = np.sum(a_js * hi_js * (self.f_wqss_js * q_sol_s_js + self.f_wscs_js * theta_eo_s_js))\
+        b2 = np.sum(a_js * hi_js * (f_wqss_js * q_sol_s_js + f_wscs_js * theta_eo_s_js))\
                   + ct.c_a * ct.rho_a * self.vent_volume * theta_o_s + H_n
 
-    def calc_c(self, k_c: float, k_r: float):
+        return b2
+
+    def calc_c(
+        self, k_c: float,
+        k_r: float,
+        f_ot_js: np.ndarray,
+        f_wsr_js: np.ndarray,
+        f_wsrs_js: np.ndarray,
+        f_wqr_js: np.ndarray) \
+        -> (float, float, float):
         """
         係数cの計算（初期に一度だけ計算すれば求まる係数）
         :param k_c: 人体表面の対流熱伝達比率
@@ -331,15 +337,27 @@ class Room:
         :return:
         """
 
-        temp = k_c + k_r * np.sum(self.f_ot_js * self.f_wsr_js)
+        temp = k_c + k_r * np.sum(f_ot_js * f_wsr_js)
 
-        self.c0 = 1.0 / temp
+        c0 = 1.0 / temp
 
-        self.c1 = - k_r * np.sum(self.f_ot_js * self.f_wsrs_js) / temp
+        c1 = - k_r * np.sum(f_ot_js * f_wsrs_js) / temp
 
-        self.c2 = - k_r * np.sum(self.f_ot_js * self.f_wqr_js) / temp
+        c2 = - k_r * np.sum(f_ot_js * f_wqr_js) / temp
 
-    def calc_c3(self, k_c: float, k_r: float, theta_eo_s_js: float, q_sol_s_js: float):
+        return (c0, c1, c2)
+
+    def calc_c3(
+        self,
+        f_ot_js: np.ndarray,
+        f_wsr_js: np.ndarray,
+        f_wscs_js: np.ndarray,
+        f_wqss_js: np.ndarray,
+        k_c: float,
+        k_r: float,
+        theta_eo_s_js: float,
+        q_sol_s_js: float
+        ) -> float:
         """
         係数c3の計算（毎時計算が必要）
         :param k_c: 人体表面の対流熱伝達比率
@@ -349,34 +367,64 @@ class Room:
         :return:
         """
 
-        temp = k_c + k_r * np.sum(self.f_ot_js * self.f_wsr_js)
+        temp = k_c + k_r * np.sum(f_ot_js * f_wsr_js)
 
-        self.c3 = - k_r * np.sum(self.f_ot_js * (self.f_wscs_js * theta_eo_s_js + self.f_wqss_js * q_sol_s_js)) / temp
+        c3 = - k_r * np.sum(f_ot_js * (f_wscs_js * theta_eo_s_js + f_wqss_js * q_sol_s_js)) / temp
 
-    def calc_d(self):
+        return c3
+
+    def calc_d(
+        self,
+        eps: float,
+        a0: float,
+        b0: float,
+        b1: float,
+        c0: float,
+        c1: float,
+        c2: float) -> (float, float, float):
         """
         係数dの計算（初期に一度だけ計算すれば求まる係数）
         :return:
         """
 
-        temp = ((1.0 - self.eps) * self.b0 / self.a0 + self.eps - self.c1)
-        self.d0 = self.c0 / temp
+        temp = ((1.0 - eps) * b0 / a0 + eps - c1)
+        d0 = c0 / temp
 
-        self.d1 = - (1.0 - self.eps) / self.a0 / temp
+        d1 = - (1.0 - eps) / a0 / temp
 
-        self.d2 = (self.c2 - (1.0 - self.eps) * self.b1 / self.a0) / temp
+        d2 = (c2 - (1.0 - eps) * b1 / a0) / temp
 
-    def calc_d3(self):
+        return (d0, d1, d2)
+
+    def calc_d3(
+        self,
+        eps: float,
+        a0: float,
+        b0: float,
+        b2: float,
+        c1: float,
+        c3: float
+        ) -> float:
         """
         係数d3の計算（毎時計算が必要）
         :return:
         """
 
-        temp = ((1.0 - self.eps) * self.b0 / self.a0 + self.eps - self.c1)
+        temp = ((1.0 - eps) * b0 / a0 + eps - c1)
 
-        self.d3 = (self.c3 - (1.0 - self.eps) * self.b2 / self.a0) / temp
+        d3 = (c3 - (1.0 - eps) * b2 / a0) / temp
 
-    def calc_theta_rs(self, theta_ot_set: float, mode: str):
+        return d3
+
+    def calc_theta_rs(
+        self,
+        d0: float,
+        d1: float,
+        d2: float,
+        d3: float,
+        theta_ot_set: float,
+        mode: str
+        ) -> float:
         """
         最低保障温度の計算（毎時計算が必要）
         :param theta_ot_set: 設定作用温度[℃]
@@ -391,4 +439,4 @@ class Room:
             l_c = self.l_c_h
             l_r = self.l_r_h
 
-        return self.d0 * theta_ot_set + self.d1 * l_c + self.d2 * l_r + self.d3
+        return d0 * theta_ot_set + d1 * l_c + d2 * l_r + d3
