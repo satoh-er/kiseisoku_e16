@@ -1,9 +1,12 @@
+from this import d
 import pandas as pd
 import numpy as np
+import copy
 
 import wall as wl
 import room as rm
 import weather as wdt
+# import pre_calc_parameters as pcp
 
 
 def main():
@@ -31,20 +34,6 @@ def main():
     schedule = pd.read_excel('parameters.xlsx', sheet_name='schedule', header=0)
     ac_demand = schedule['ac_demand'].values
     theta_ot_set = schedule['theta_ot,set'].values
-
-    temp = (ac_demand[1:] == ac_demand[:-1])
-    left = np.arange(len(temp))
-    left[temp] = 0
-    np.maximum.accumulate(left, out=left)
-    right = np.arange(len(temp))
-    right[temp[::-1]] = 0
-    np.maximum.accumulate(right, out=right)
-    right = len(temp) - right[::-1] - 1
-    result = np.zeros_like(ac_demand)
-    result[:-1] += right
-    result[1:] -= left
-    result[-1] = 0
-    result = np.where(ac_demand == 1, 0, result)
 
     # 気象データを読み込む
     weather_data = wdt.Weather(pd.read_excel('parameters.xlsx', sheet_name='weather'))
@@ -101,33 +90,58 @@ def main():
         isky=weather_data.isky
     ) for bp in room.building_parts]
 
-    pd2 = count_continuous_values(df=schedule, column_name='ac_demand')
-
     # 透過日射熱取得の計算（日除け、入射角特性が考慮されていない）
     q_gt_js = np.array([bp.calc_q_gt() for bp in room.building_parts])
     a_js = np.array([bp.area for bp in room.building_parts]).reshape(-1, 1)
     q_gt_ns = np.sum(a_js * q_gt_js, axis=0)
 
     # 各種係数の計算
-    room.calc_fot_js()
-    room.calc_f()
-    room.calc_a0()
-    room.calc_eps()
-    room.calc_b()
-    room.calc_c(k_c=0.5, k_r=0.5)
-    room.calc_d()
-    room.calc_b2(theta_o_s=2.0, theta_eo_s_js=5.0, q_sol_s_js=50.0, H_n=100.0)
-    room.calc_c3(k_c=0.5, k_r=0.5, theta_eo_s_js=5.0, q_sol_s_js=50.0)
-    room.calc_d3()
+    f_ot_js = room.calc_fot_js()
+    f_wsr_js, f_wqr_js, f_wsrs_js, f_wscs_js, f_wqss_js = room.calc_f()
+    a0 = room.calc_a0(f_wsr_js)
+    eps = room.calc_eps(a0)
+    b0, b1 = room.calc_b(f_wsrs_js, f_wqr_js)
+    c0, c1, c2 = room.calc_c(
+        k_c=0.5,
+        k_r=0.5,
+        f_ot_js=f_ot_js,
+        f_wsr_js=f_wsr_js,
+        f_wsrs_js=f_wsrs_js,
+        f_wqr_js=f_wqr_js
+        )
+    d0, d1, d2 = room.calc_d(eps=eps, a0=a0, b0=b0, b1=b1, c0=c0, c1=c1, c2=c2)
+    
+    # これ以降、毎時計算
+    b2 = room.calc_b2(
+        f_wqss_js=f_wqr_js,
+        f_wscs_js=f_wscs_js,
+        theta_o_s=wdt.theta_o,
+        theta_eo_s_js=wdt.theta_o,
+        q_sol_s_js=wdt.isky,
+        H_n=100.0
+        )
+    c3 = room.calc_c3(
+        k_c=0.5,
+        k_r=0.5,
+        f_ot_js=f_ot_js,
+        f_wsr_js=f_wsr_js,
+        f_wscs_js=f_wscs_js,
+        f_wqss_js=f_wqss_js,
+        theta_eo_s_js=wdt.theta_o,
+        q_sol_s_js=wdt.isky
+        )
+    d3 = room.calc_d3(eps=eps, a0=a0, b0=b0, b2=b2, c1=c1, c3=c3)
 
-    print(room.calc_theta_rs(theta_ot_set=22.0, mode='H'))
-
-def count_continuous_values(df, column_name):
-    y = df[column_name]
-    df[column_name+ "_counum"] = y.groupby((y != y.shift()).cumsum()).cumcount() + 1
-
-    return df
+    print(room.calc_theta_rs(
+        d0=d0,
+        d1=d1,
+        d2=d2,
+        d3=d3,
+        theta_ot_set=22.0,
+        mode='H'
+        ))
 
 
 if __name__ == '__main__':
+
     main()
