@@ -49,12 +49,8 @@ class Room:
         """
         Roomクラスの初期化
         :param air_volume: 室気積[m3]
-        :param vent_volume: 室換気量[m3/h]
+        :param vent_volume: 室換気量[m3/s]
         :param beta: 放射空調の即時対流成分比率[－]（0～1）
-        :param is_cooling_convenction: 冷房が対流式か否か
-        :param is_heating_convvection: 暖房が対流式か否か
-        :param cooling_capacity: 冷房最大能力[kW]
-        :param heating_capacity: 暖房最大能力[kW]
         """
 
         # 室気積[m3]
@@ -88,14 +84,15 @@ class Room:
         建物の部位を追加登録する関数
         :param name: 部位名称
         :param area: 部位面積[m2]
-        :param wa: 部位の方位角[゜]
-        :param wb: 部位の傾斜角[゜]（鉛直面：90、水平面：0）
-        :param bp_type: 壁体名称
         :param temp_diff_coeff: 隣室温度差係数（0～1）
         :param hi: 室内側総合熱伝達率[W/(m2･K)]
         :param flr: 放射空調の当該部位の吸収比率[－]（0～1）
-        :param bp_list: 壁体名称リスト
-        :param walls: 壁体クラス
+        :param u_value: 部位の熱貫流率[W/(m2･K)]
+        :param rfa0: 部位の吸熱応答の初項[m2･K/W]
+        :param rft0: 部位の貫流応答の初項[－]
+        :param r: 公比
+        :param rfa1: 部位の指数項別吸熱応答係数[m2･K/W]
+        :param rft1: 部位の指数項別貫流応答係数[－]
         :return:
         """
 
@@ -117,6 +114,11 @@ class Room:
         """
         係数fの計算（初期に一度だけ計算すれば求まる係数）
         :return:
+            係数 f_wsr
+            係数 f_wqr
+            係数 f_wsrs
+            係数 f_fscs
+            係数 f_wqss
         """
 
         # 定常状態スタート時の畳み込み積分
@@ -145,23 +147,12 @@ class Room:
 
         return (f_wsr_js, f_wqr_js, f_wsrs_js, f_wscs_js, f_wqss_js)
 
-    def calc_fot_js(self):
-        """
-        人体に対する各部位の形態係数の計算
-        ここでは、面積案分にしている
-        :return:
-        """
-
-        a_js = np.array([bp.area for bp in self.building_parts]).flatten()
-
-        fot_js = a_js / np.sum(a_js)
-
-        return fot_js
-
     def calc_a0(self, f_wsr_js: np.ndarray) -> float:
         """
         係数a0の計算（初期に一度だけ計算すれば求まる係数）
+        :param f_wsr_js: 係数 f_wsr_js
         :return:
+            係数 a0
         """
 
         # 各種numpy配列を作成
@@ -175,6 +166,7 @@ class Room:
     def calc_eps(self, a0: float) -> float:
         """
         係数εの計算（初期に一度だけ計算すれば求まる係数）
+        :param a0: 係数 a0
         :return:
         """
 
@@ -185,6 +177,8 @@ class Room:
     def calc_b(self, f_wsrs_js: np.ndarray, f_wqr_js: np.ndarray) -> (float, float):
         """
         係数b0、b1の計算（初期に一度だけ計算すれば求まる係数）
+        :param f_wsrs_js: 係数 f_wsrs_js
+        :param f_wqr_js: 係数 f_wqr_js
         :return:
         """
 
@@ -210,6 +204,8 @@ class Room:
         H_n: float) -> float:
         """
         係数b2の計算（毎時計算が必要）
+        :param f_wqss_js: 係数 f_wqss_js
+        :param f_wscs_js: 係数 f_wscs_js
         :param theta_o_s: 外気温度[℃]
         :param theta_eo_s_js: 部位j裏面の相当外気温度[℃]
         :param q_sol_s_js: 部位jの室内表面の透過日射熱取得[W/m2]
@@ -241,6 +237,10 @@ class Room:
         係数cの計算（初期に一度だけ計算すれば求まる係数）
         :param k_c: 人体表面の対流熱伝達比率
         :param k_r: 人体表面の放射熱伝達比率
+        :param f_ot_js: 係数 f_ot_js
+        :param f_wsr_js: 係数 f_wsr_js
+        :param f_wsrs_js: 係数 f_wsrs_js
+        :param f_wqr_js: 係数 f_wqr_js
         :return:
         """
 
@@ -267,6 +267,10 @@ class Room:
         ) -> float:
         """
         係数c3の計算（毎時計算が必要）
+        :param f_ot_js: 係数 f_ot_js
+        :param f_wsr_js: 係数 f_wsr_js
+        :param f_wscs_js: 係数 f_wscs_js
+        :param f_wqss_js: 係数 f_wqss_js
         :param k_c: 人体表面の対流熱伝達比率
         :param k_r: 人体表面の放射熱伝達比率
         :param theta_eo_s_js: 部位j裏面の相当外気温度[℃]
@@ -297,6 +301,13 @@ class Room:
         c2: float) -> (float, float, float):
         """
         係数dの計算（初期に一度だけ計算すれば求まる係数）
+        :param eps: 係数 eps
+        :param a0: 係数 a0
+        :param b0: 係数 b0
+        :param b1: 係数 b1
+        :param c0: 係数 c0
+        :param c1: 係数 c1
+        :param c2: 係数 c2
         :return:
         """
 
@@ -320,6 +331,12 @@ class Room:
         ) -> float:
         """
         係数d3の計算（毎時計算が必要）
+        :param eps: 係数 eps
+        :param a0: 係数 a0
+        :param b0: 係数 b0
+        :param b2: 係数 b2
+        :param c1: 係数 c1
+        :param c3: 係数 c3
         :return:
         """
 
@@ -341,8 +358,13 @@ class Room:
         ) -> float:
         """
         最低保障温度の計算（毎時計算が必要）
+        :param d0: 係数 d0
+        :param d1: 係数 d1
+        :param d2: 係数 d2
+        :param d3: 係数 d3
         :param theta_ot_set: 設定作用温度[℃]
-        :param mode: 空調モード（冷房or暖房）
+        :param l_c: 対流空調の能力[W]（冷房能力は負）
+        :param l_r: 放射空調の能力[W]（冷房能力は負）
         :return:
         """
 
