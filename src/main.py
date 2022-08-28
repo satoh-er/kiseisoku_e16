@@ -90,7 +90,7 @@ def main():
         )
 
     # 各種係数の計算
-    f_ot_js = room.calc_fot_js()
+    f_ot_js = pp.f_mrt_hum_is_js[0,:]
     f_wsr_js, f_wqr_js, f_wsrs_js, f_wscs_js, f_wqss_js = room.calc_f()
     a0 = room.calc_a0(f_wsr_js)
     eps = room.calc_eps(a0)
@@ -106,13 +106,14 @@ def main():
     d0, d1, d2 = room.calc_d(eps=eps, a0=a0, b0=b0, b1=b1, c0=c0, c1=c1, c2=c2)
     
     # これ以降、毎時計算
+    H_ns = np.insert(pp.q_gen_is_ns, [0], pp.q_gen_is_ns[:,-1:])
     b2 = room.calc_b2(
         f_wqss_js=f_wqr_js,
         f_wscs_js=f_wscs_js,
         theta_o_s=theta_o_ns,
         theta_eo_s_js=theta_eo_js_ns,
         q_sol_s_js=q_s_sol_js_ns,
-        H_n=100.0
+        H_n=H_ns
         )
     c3 = room.calc_c3(
         k_c=0.5,
