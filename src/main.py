@@ -106,6 +106,7 @@ def main():
     d0, d1, d2 = room.calc_d(eps=eps, a0=a0, b0=b0, b1=b1, c0=c0, c1=c1, c2=c2)
     
     # これ以降、毎時計算
+    # 内部発熱を取得
     H_ns = np.insert(pp.q_gen_is_ns, [0], pp.q_gen_is_ns[:,-1:])
     b2 = room.calc_b2(
         f_wqss_js=f_wqr_js,
