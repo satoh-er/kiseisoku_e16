@@ -59,11 +59,22 @@ def main():
     beta = pp.beta_h_is.flatten()[0]
 
     # 機器情報を読み込む
-    # TODO: 設備のパラメータは固定値とした
-    is_cooling_convection = True
-    is_heating_convection = True
-    cooling_capacity = - 1000.0 * 4.5
-    heating_capacity = 1000.0 * 6.5
+    ed_c = rd['equipments']['cooling_equipments']
+    ed_h = rd['equipments']['heating_equipments']
+    is_cooling_convection = (ed_c[0]['equipment_type'] == 'rac')
+    is_heating_convection = (ed_h[0]['equipment_type'] == 'rac')
+    
+    # 冷房能力
+    if is_cooling_convection:
+        cooling_capacity = - ed_c[0]['property']['q_max']
+    else:
+        cooling_capacity = - ed_c[0]['property']['max_capacity'] * ed_c[0]['property']['area']
+    
+    # 暖房能力
+    if is_heating_convection:
+        heating_capacity = ed_h[0]['property']['q_max']
+    else:
+        heating_capacity = ed_h[0]['property']['max_capacity'] * ed_h[0]['property']['area']
 
     # 室クラスの作成
     room = rm.Room(
