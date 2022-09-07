@@ -15,7 +15,7 @@ def main():
 
     delta_t = 900.0
 
-    with open('example_single_room1.json', 'r', encoding='utf-8') as js:
+    with open('input.json', 'r', encoding='utf-8') as js:
         rd = json.load(js)
 
     # 気象データの生成 => weather_for_method_file.csv
@@ -36,14 +36,14 @@ def main():
     pp, ppg = pcp.make_pre_calc_parameters(
         delta_t=delta_t,
         rd=rd,
-        oc=w,
+        w=w,
         scd=schedule
     )
 
     # 気象条件の1時間移動平均
     theta_o_ns = lib.moving_average_ns(pp.theta_o_ns)
     q_trs_sol_is_ns = lib.moving_average_js_ns(pp.q_trs_sol_is_ns).flatten()
-    theta_eo_js_ns = lib.moving_average_js_ns(pp.theta_dstrb_js_ns).reshape(pp.n_bdry, -1)
+    theta_eo_js_ns = lib.moving_average_js_ns(pp.theta_o_eqv_js_ns).reshape(pp.n_bdry, -1)
 
     # 透過日射の室内表面での吸収日射量の計算[W/m2]
     # すべての部位に均等に当たると仮定
@@ -84,7 +84,6 @@ def main():
     )
 
     # 部位情報を読み込む
-    # TODO: 熱貫流率の計算値が暫定値になっている
     for j in range(pp.n_bdry):
         room.building_part_append(
             name=pp.name_bdry_js[j].astype(str),
@@ -92,7 +91,7 @@ def main():
             temp_diff_coeff=(1.0 - pp.k_ei_js_js[j,j]).astype(float),
             hi=(pp.h_s_c_js[j,0] + pp.h_s_r_js[j,0]).astype(float),
             flr=pp.f_flr_h_js_is[j, 0].astype(float),
-            u_value=0.5,
+            u_value=pp.simulation_u_value[j, 0],
             rfa0=pp.phi_a0_js[j,0].astype(float),
             rft0=pp.phi_t0_js[j,0].astype(float),
             r=pp.r_js_ms[j,:].flatten(),
@@ -139,6 +138,7 @@ def main():
         )
     d3 = room.calc_d3(eps=eps, a0=a0, b0=b0, b2=b2, c1=c1, c3=c3)
 
+    # TODO: 冷房の設定作用温度は27℃で固定になっている
     theta_rs_c = room.calc_theta_rs(
         d0=d0,
         d1=d1,
@@ -149,6 +149,7 @@ def main():
         l_r=cooling_capacity if not is_cooling_convection else 0.0
         )
 
+    # TODO: 暖房の設定作用温度は20℃で固定になっている
     theta_rs_h = room.calc_theta_rs(
         d0=d0,
         d1=d1,
