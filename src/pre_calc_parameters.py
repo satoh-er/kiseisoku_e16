@@ -3,13 +3,11 @@ import pandas as pd
 from dataclasses import dataclass
 from typing import Dict, List, Callable, Optional, Tuple
 import logging
-import json
 
 from matrix_method import v_diag
 from building import Building
-import interval
-import ot_target, next_condition, schedule, rooms, boundaries, equipments, \
-    infiltration, occupants_form_factor, shape_factor, solar_absorption, mechanical_ventilations, operation_, weather
+import weather, ot_target, next_condition, schedule, rooms, boundaries, equipments, \
+    infiltration, occupants_form_factor, shape_factor, solar_absorption, mechanical_ventilations, operation_
 
 
 @dataclass
@@ -91,9 +89,6 @@ class PreCalcParameters:
     # 境界jの面積, m2, [j, 1]
     a_s_js: np.ndarray
 
-    # ステップnの境界jにおける外気側等価温度の外乱成分, degree C, [j, 8760*4]
-    theta_dstrb_js_ns: np.ndarray
-
     # 放射暖房対流比率, [i, 1]
     beta_h_is: np.ndarray
     beta_c_is: np.ndarray
@@ -137,6 +132,9 @@ class PreCalcParameters:
     # 境界jにおける室内側対流熱伝達率, W/m2K, [j, 1]
     h_s_c_js: np.ndarray
 
+    # 境界jにおけるシミュレーションに用いる表面熱伝達抵抗での熱貫流率, W/m2K, [j,1]
+    simulation_u_value: np.ndarray
+
     # WSR, WSB の計算 式(24)
     f_wsr_js_is: np.ndarray
 
@@ -155,6 +153,14 @@ class PreCalcParameters:
 
     # ステップnの外気絶対湿度, kg/kg(DA), [n]
     x_o_ns: np.ndarray
+
+    # 温度差係数, -, [j, 1]
+    k_eo_js: np.ndarray
+
+    k_s_r_js_is: np.ndarray
+
+    # ステップ n の境界 j における相当外気温度, ℃, [j, n]
+    theta_o_eqv_js_ns: np.ndarray
 
     get_operation_mode_is_n: Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray], np.ndarray]
 
@@ -199,14 +205,17 @@ class PreCalcParametersGround:
     # ステップnの外気温度, degree C, [n]
     theta_o_ns: np.ndarray
 
-    # ステップnの境界jにおける外気側等価温度の外乱成分, degree C, [j, 8760*4]
-    theta_dstrb_js_ns: np.ndarray
+    # 温度差係数, -, [j, 1]
+    k_eo_js: np.ndarray
+
+    # ステップ n の境界 j における相当外気温度, ℃, [j, n]
+    theta_o_eqv_js_ns: np.ndarray
 
 
 def make_pre_calc_parameters(
         delta_t: float,
         rd: Dict,
-        oc: weather.Weather,
+        w: weather.Weather,
         scd: schedule.Schedule,
         q_trs_sol_is_ns: Optional[np.ndarray] = None,
         theta_o_eqv_js_ns: Optional[np.ndarray] = None
@@ -216,7 +225,7 @@ def make_pre_calc_parameters(
     Args:
         delta_t:  時間間隔, s
         rd: 住宅計算条件
-        oc: 外界気象データクラス
+        w: 外界気象データクラス
         scd: スケジュールクラス
         q_trs_sol_is_ns: optional テスト用　値を指定することができる。未指定の場合は計算する。
         theta_o_eqv_js_ns: optional テスト用　値を指定することができる。未指定の場合は計算する。
@@ -227,13 +236,8 @@ def make_pre_calc_parameters(
 
     logger = logging.getLogger('HeatLoadCalc').getChild('core').getChild('pre_calc_parameters')
 
-    a_sun_ns = oc.a_sun_ns_plus
-    h_sun_ns = oc.h_sun_ns_plus
-    i_dn_ns = oc.i_dn_ns_plus
-    i_sky_ns = oc.i_sky_ns_plus
-    r_n_ns = oc.r_n_ns_plus
-    theta_o_ns = oc.theta_o_ns_plus
-    x_o_ns = oc.x_o_ns_plus
+    theta_o_ns = w.theta_o_ns_plus
+    x_o_ns = w.x_o_ns_plus
 
     # ステップ n の室 i における内部発熱, W, [i, n]
     q_gen_is_ns = scd.q_gen_is_ns
@@ -297,82 +301,88 @@ def make_pre_calc_parameters(
     bs = boundaries.Boundaries(
         id_rm_is=id_rm_is,
         bs_list=rd['boundaries'],
-        oc=oc
+        w=w
     )
 
     # 境界の数
-    n_b = bs.get_n_b()
+    n_b = bs.n_b
 
     # 境界のID
-    id_b_js = bs.get_id_js()
+    id_b_js = bs.id_js
 
     # 名前, [j, 1]
-    name_bdry_js = bs.get_name_bdry_js()
+    name_bdry_js = bs.name_b_js
 
     # 名前2, [j, 1]
-    sub_name_bdry_js = bs.get_sub_name_bdry_js()
+    sub_name_bdry_js = bs.sub_name_b_js
 
     # 室iと境界jの関係を表す係数（境界jから室iへの変換）, [i, j]
-    p_is_js = bs.get_p_is_js(n_rm=n_rm)
+    p_is_js = bs.p_is_js
 
     # 室iと境界jの関係を表す係数（室iから境界jへの変換）
-    p_js_is = bs.get_p_js_is(n_rm=n_rm)
+    p_js_is = bs.p_js_is
 
     # 床かどうか, [j, 1]
-    is_floor_js = bs.get_is_floor_js()
+    is_floor_js = bs.is_floor_js
 
     # 地盤かどうか, [j, 1]
-    is_ground_js = bs.get_is_ground_js()
+    is_ground_js = bs.is_ground_js
 
-    # 境界jの裏面温度に他の境界の等価温度が与える影響, [j, j]
-    k_ei_js_js = bs.get_k_ei_js_js()
+    # 境界jの裏面温度に他の境界の等価室温が与える影響, [j, j]
+    k_ei_js_js = bs.k_ei_js_js
+
+    # 境界 j の裏面温度に室温が与える影響, [j, i]
+    k_s_r_js_is = bs.k_s_r_js_is
 
     # 温度差係数
-    k_eo_js = bs.get_k_eo_js()
+    k_eo_js = bs.k_eo_js
 
     # 境界jの日射吸収の有無, [j, 1]
-    p_s_sol_abs_js = bs.get_p_s_sol_abs_js()
+    p_s_sol_abs_js = bs.p_s_sol_abs_js
 
     # 境界jの室内側表面放射熱伝達率, W/m2K, [j, 1]
-    h_s_r_js = bs.get_h_s_r_js()
+    h_s_r_js = bs.h_s_r_js
 
     # 境界jの室内側表面対流熱伝達率, W/m2K, [j, 1]
-    h_s_c_js = bs.get_h_s_c_js()
+    h_s_c_js = bs.h_s_c_js
+
+    # シミュレーションに用いる表面熱伝達抵抗での熱貫流率, W/m2K, [j,1]
+    simulation_u_value = bs.simulation_u_value
 
     # 境界jの面積, m2, [j, 1]
-    a_s_js = bs.get_a_s_js()
+    a_s_js = bs.a_s_js
 
     # 境界jの吸熱応答係数の初項, m2K/W, [j, 1]
-    phi_a0_js = bs.get_phi_a0_js()
+    phi_a0_js = bs.phi_a0_js
 
     # 境界jの項別公比法における項mの吸熱応答係数の第一項 , m2K/W, [j, 12]
-    phi_a1_js_ms = bs.get_phi_a1_js_ms()
+    phi_a1_js_ms = bs.phi_a1_js_ms
 
     # 境界jの貫流応答係数の初項, [j, 1]
-    phi_t0_js = bs.get_phi_t0_js()
+    phi_t0_js = bs.phi_t0_js
 
     # 境界jの項別公比法における項mの貫流応答係数の第一項, [j, 12]
-    phi_t1_js_ms = bs.get_phi_t1_js_ms()
+    phi_t1_js_ms = bs.phi_t1_js_ms
 
     # 境界jの項別公比法における項mの公比, [j, 12]
-    r_js_ms = bs.get_r_js_ms()
+    r_js_ms = bs.r_js_ms
 
-    # ステップnの室iにおける窓の透過日射熱取得, W, [8760*4]
+    # ステップ n の室 i における窓の透過日射熱取得, W, [n]
     #　このif文は、これまで実施してきたテストを維持するために設けている。
     # いずれテスト方法を整理して、csvで与える方式を削除すべきである。
     # CSVで与える方式があることは（将来的に削除予定であるため）仕様書には記述しない。
     if q_trs_sol_is_ns is None:
-        q_trs_sol_is_ns = bs.get_q_trs_sol_is_ns(n_rm=n_rm)
+        q_trs_sol_is_ns = bs.q_trs_sol_is_ns
     else:
         # ステップn+1に対応するために0番要素に最終要素を代入
         q_trs_sol_is_ns = np.append(q_trs_sol_is_ns, q_trs_sol_is_ns[:, 0:1], axis=1)
 
-    # ステップ n の境界 j における相当外気温度, ℃, [j, 8760*4]
+    # ステップ n の境界 j における相当外気温度, ℃, [j, n]
     #　このif文は、これまで実施してきたテストを維持するために設けている。
     # いずれテスト方法を整理して、csvで与える方式を削除すべきである。
     # CSVで与える方式があることは（将来的に削除予定であるため）仕様書には記述しない。
     if theta_o_eqv_js_ns is None:
-        theta_o_eqv_js_ns = bs.get_theta_o_eqv_js_ns()
+        theta_o_eqv_js_ns = bs.theta_o_eqv_js_ns
     else:
         # ステップn+1に対応するために0番要素に最終要素を代入
         theta_o_eqv_js_ns = np.append(theta_o_eqv_js_ns, theta_o_eqv_js_ns[:, 0:1], axis=1)
@@ -429,7 +439,7 @@ def make_pre_calc_parameters(
 
     # endregion
 
-    # 室iの在室者に対する境界jの形態係数, [i, j]
+    # 室 i の在室者に対する境界jの形態係数, [i, j]
     f_mrt_hum_is_js = occupants_form_factor.get_f_mrt_hum_js(
         n_rm=n_rm,
         n_b=n_b,
@@ -459,9 +469,6 @@ def make_pre_calc_parameters(
         q_trs_sol_is_ns=q_trs_sol_is_ns
     )
 
-    # ステップ n の境界 j における外気側等価温度の外乱成分, ℃, [j, n]
-    theta_dstrb_js_ns = get_theta_dstrb_js_ns(k_eo_js=k_eo_js, theta_o_eqv_js_ns=theta_o_eqv_js_ns)
-
     # 係数 f_AX, -, [j, j]
     f_ax_js_js = get_f_ax_js_is(
         f_mrt_is_js=f_mrt_is_js,
@@ -480,7 +487,8 @@ def make_pre_calc_parameters(
         k_ei_js_js=k_ei_js_js,
         p_js_is=p_js_is,
         phi_a0_js=phi_a0_js,
-        phi_t0_js=phi_t0_js
+        phi_t0_js=phi_t0_js,
+        k_s_r_js_is=k_s_r_js_is
     )
 
     # 係数 f_CRX, degree C, [j, n]
@@ -491,7 +499,8 @@ def make_pre_calc_parameters(
         phi_a0_js=phi_a0_js,
         phi_t0_js=phi_t0_js,
         q_s_sol_js_ns=q_s_sol_js_ns,
-        theta_dstrb_js_ns=theta_dstrb_js_ns
+        k_eo_js=k_eo_js,
+        theta_o_eqv_js_ns=theta_o_eqv_js_ns
     )
 
     # 係数 f_WSR, -, [j, i]
@@ -576,7 +585,6 @@ def make_pre_calc_parameters(
         n_hum_is_ns=n_hum_is_ns,
         x_gen_is_ns=x_gen_is_ns,
         f_mrt_hum_is_js=f_mrt_hum_is_js,
-        theta_dstrb_js_ns=theta_dstrb_js_ns,
         n_bdry=n_b,
         r_js_ms=r_js_ms,
         phi_t0_js=phi_t0_js,
@@ -590,6 +598,7 @@ def make_pre_calc_parameters(
         f_flr_c_js_is=f_flr_c_js_is,
         h_s_r_js=h_s_r_js,
         h_s_c_js=h_s_c_js,
+        simulation_u_value=simulation_u_value,
         f_mrt_is_js=f_mrt_is_js,
         q_s_sol_js_ns=q_s_sol_js_ns,
         q_sol_frt_is_ns=q_sol_frt_is_ns,
@@ -609,11 +618,14 @@ def make_pre_calc_parameters(
         get_infiltration=get_infiltration,
         calc_next_temp_and_load=calc_next_temp_and_load,
         get_f_l_cl=get_f_l_cl,
-        met_is=met_is
+        met_is=met_is,
+        k_eo_js=k_eo_js,
+        theta_o_eqv_js_ns=theta_o_eqv_js_ns,
+        k_s_r_js_is=k_s_r_js_is
     )
 
     # 地盤の数
-    n_grounds = bs.get_n_ground()
+    n_grounds = bs.n_ground
 
     pre_calc_parameters_ground = PreCalcParametersGround(
         n_grounds=n_grounds,
@@ -625,7 +637,8 @@ def make_pre_calc_parameters(
         h_s_r_js=h_s_r_js[is_ground_js.flatten(), :],
         h_s_c_js=h_s_c_js[is_ground_js.flatten(), :],
         theta_o_ns=theta_o_ns,
-        theta_dstrb_js_ns=theta_dstrb_js_ns[is_ground_js.flatten(), :],
+        k_eo_js=k_eo_js[is_ground_js.flatten(), :],
+        theta_o_eqv_js_ns=theta_o_eqv_js_ns[is_ground_js.flatten(), :]
     )
 
     return pre_calc_parameters, pre_calc_parameters_ground
@@ -665,7 +678,7 @@ def get_f_wsr_js_is(f_ax_js_js, f_fia_js_is):
     return np.dot(np.linalg.inv(f_ax_js_js), f_fia_js_is)
 
 
-def get_f_crx_js_ns(h_s_c_js, h_s_r_js, k_ei_js_js, phi_a0_js, phi_t0_js, q_s_sol_js_ns, theta_dstrb_js_ns):
+def get_f_crx_js_ns(h_s_c_js, h_s_r_js, k_ei_js_js, phi_a0_js, phi_t0_js, q_s_sol_js_ns, k_eo_js, theta_o_eqv_js_ns):
     """
 
     Args:
@@ -675,7 +688,8 @@ def get_f_crx_js_ns(h_s_c_js, h_s_r_js, k_ei_js_js, phi_a0_js, phi_t0_js, q_s_so
         phi_a0_js: 境界 j の吸熱応答係数の初項, m2 K/W, [j, 1]
         phi_t0_js: 境界 j の貫流応答係数の初項, -, [j, 1]
         q_s_sol_js_ns: ステップ n における境界 j の透過日射吸収熱量, W/m2, [j, n]
-        theta_dstrb_js_ns: ステップ n の境界 j における外気側等価温度の外乱成分, degre C, [j, n]
+        k_eo_js: 境界 j の裏面温度に境界 j の相当外気温度が与える影響, -, [j, 1]
+        theta_o_eqv_js_ns: ステップ n における境界 j の相当外気温度, degree C, [j, 1]
 
     Returns:
         係数 f_CRX, degree C, [j, n]
@@ -686,10 +700,10 @@ def get_f_crx_js_ns(h_s_c_js, h_s_r_js, k_ei_js_js, phi_a0_js, phi_t0_js, q_s_so
 
     return phi_a0_js * q_s_sol_js_ns\
         + phi_t0_js / (h_s_c_js + h_s_r_js) * np.dot(k_ei_js_js, q_s_sol_js_ns)\
-        + phi_t0_js * theta_dstrb_js_ns
+        + phi_t0_js * theta_o_eqv_js_ns * k_eo_js
 
 
-def get_f_fia_js_is(h_s_c_js, h_s_r_js, k_ei_js_js, p_js_is, phi_a0_js, phi_t0_js):
+def get_f_fia_js_is(h_s_c_js, h_s_r_js, k_ei_js_js, p_js_is, phi_a0_js, phi_t0_js, k_s_r_js_is):
     """
 
     Args:
@@ -707,7 +721,7 @@ def get_f_fia_js_is(h_s_c_js, h_s_r_js, k_ei_js_js, p_js_is, phi_a0_js, phi_t0_j
         式(4.4)
     """
 
-    return phi_a0_js * h_s_c_js * p_js_is + np.dot(k_ei_js_js, p_js_is) * phi_t0_js * h_s_c_js / (h_s_c_js + h_s_r_js)
+    return phi_a0_js * h_s_c_js * p_js_is + np.dot(k_ei_js_js, p_js_is) * phi_t0_js * h_s_c_js / (h_s_c_js + h_s_r_js) + phi_t0_js * k_s_r_js_is
 
 
 def get_f_ax_js_is(f_mrt_is_js, h_s_c_js, h_s_r_js, k_ei_js_js, p_js_is, phi_a0_js, phi_t0_js):
@@ -732,23 +746,6 @@ def get_f_ax_js_is(f_mrt_is_js, h_s_c_js, h_s_r_js, k_ei_js_js, p_js_is, phi_a0_
     return v_diag(1.0 + phi_a0_js * (h_s_c_js + h_s_r_js)) \
         - np.dot(p_js_is, f_mrt_is_js) * h_s_r_js * phi_a0_js \
         - np.dot(k_ei_js_js, np.dot(p_js_is, f_mrt_is_js)) * h_s_r_js * phi_t0_js / (h_s_c_js + h_s_r_js)
-
-
-def get_theta_dstrb_js_ns(k_eo_js, theta_o_eqv_js_ns):
-    """
-
-    Args:
-        k_eo_js: 境界 j の裏面温度に境界 j の相当外気温度が与える影響, -, [j, 1]
-        theta_o_eqv_js_ns: ステップ n における境界 j の相当外気温度, degree C, [j, 1]
-
-    Returns:
-        ステップ n の境界 j における外気側等価温度の外乱成分, degre C, [j, n]
-
-    Notes:
-        式(4.6)
-    """
-
-    return theta_o_eqv_js_ns * k_eo_js
 
 
 def get_v_vent_mec_is_ns(v_vent_mec_general_is, v_vent_mec_local_is_ns):
@@ -799,35 +796,3 @@ def _read_weather_data(pp: pd.DataFrame):
     a_sun_ns = pp['sun azimuth'].values
 
     return a_sun_ns, h_sun_ns, i_dn_ns, i_sky_ns, r_n_ns, theta_o_ns, x_o_ns
-
-
-if __name__ == '__main__':
-
-    delta_t = 900.0
-
-    with open('example_single_room1.json', 'r', encoding='utf-8') as js:
-        rd = json.load(js)
-
-    # 気象データの生成 => weather_for_method_file.csv
-    w = weather.Weather.make_weather(
-        method='ees',
-        file_path='expanded_amedas',
-        region=6,
-        itv=interval.Interval.M15
-    )
-
-    # スケジュール
-    scd = schedule.Schedule.get_schedule(
-        number_of_occupants='auto',
-        s_name_is=[rm['schedule']['name'] for rm in rd['rooms']],
-        a_floor_is=[r['floor_area'] for r in rd['rooms']]
-    )
-
-    pp, ppg = make_pre_calc_parameters(
-        delta_t=delta_t,
-        rd=rd,
-        oc=w,
-        scd=scd,
-    )
-
-    print(pp)
