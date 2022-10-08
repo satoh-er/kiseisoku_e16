@@ -11,11 +11,11 @@ import interval
 import library as lib
 
 
-def main():
+def main(input_data: str, output_data: str):
 
     delta_t = 900.0
 
-    with open('input.json', 'r', encoding='utf-8') as js:
+    with open(input_data, 'r', encoding='utf-8') as js:
         rd = json.load(js)
 
     # 気象データの生成 => weather_for_method_file.csv
@@ -88,7 +88,7 @@ def main():
         room.building_part_append(
             name=pp.name_bdry_js[j].astype(str),
             area=pp.a_s_js[j,0].astype(float),
-            temp_diff_coeff=(1.0 - pp.k_ei_js_js[j,j]).astype(float),
+            temp_diff_coeff=pp.k_eo_js[j,0].astype(float),
             hi=(pp.h_s_c_js[j,0] + pp.h_s_r_js[j,0]).astype(float),
             flr=pp.f_flr_h_js_is[j, 0].astype(float),
             u_value=pp.simulation_u_value[j, 0],
@@ -163,9 +163,16 @@ def main():
     result = pd.DataFrame(index=pd.date_range(start='1/1/' + '1989', periods=8760 * 4 + 1, freq='15min', name='start_time'))
     result['theta_r_s_c'] = theta_rs_c
     result['theta_r_s_h'] = theta_rs_h
-    result.to_excel('result.xlsx')
+    result.to_excel(output_data)
 
 
 if __name__ == '__main__':
 
-    main()
+    main('input_data/cb1_ac.json', 'output_data/cb1_ac.xlsx')
+    main('input_data/cb1_rad.json', 'output_data/cb1_rad.xlsx')
+    main('input_data/cb2_ac.json', 'output_data/cb2_ac.xlsx')
+    main('input_data/cb2_rad.json', 'output_data/cb2_rad.xlsx')
+    main('input_data/ldk_ac.json', 'output_data/ldk_ac.xlsx')
+    main('input_data/ldk_rad.json', 'output_data/ldk_rad.xlsx')
+    main('input_data/mb_ac.json', 'output_data/mb_ac.xlsx')
+    main('input_data/mb_rad.json', 'output_data/mb_rad.xlsx')
